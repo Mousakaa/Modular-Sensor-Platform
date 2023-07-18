@@ -8,8 +8,8 @@ The [paho-mqtt](https://docs.rs/paho-mqtt/latest/paho_mqtt) crate was used to im
 
 ### TODO :
 
-[ ] Implement automatic reconnection
-[ ] Add timestamp to sensor data struct
+* [ ] Implement automatic reconnection
+* [ ] Add timestamp to sensor data struct
 
 
 ## The GUI
