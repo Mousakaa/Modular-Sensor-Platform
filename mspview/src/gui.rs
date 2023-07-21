@@ -1,6 +1,6 @@
 use eframe::egui;
 use std::collections::VecDeque;
-use paho_mqtt::{Message, AsyncReceiver};
+use paho_mqtt::{Client, Message, Receiver};
 use image::EncodableLayout;
 use colours;
 
@@ -22,10 +22,16 @@ pub enum Display {
 
 /// Main structure of the UI.
 pub struct App {
+    /// MQTT client
+    pub mqtt_client: Client,
     /// MQTT message stream.
-    pub notifications: AsyncReceiver<Option<Message>>,
+    pub notifications: Option<Receiver<Option<Message>>>,
     /// Queue of the received messages, filled from front to back.
     pub msg_queue: VecDeque<SensorState>,
+    /// MQTT server URI.
+    pub server: String,
+    /// MQTT topic.
+    pub topic: String,
     /// Current display mode.
     current_display: Display,
     /// A [`Vec`] containing the number of rows and columns of capacitive presence sensors on each sensor
@@ -53,10 +59,13 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(notif: AsyncReceiver<Option<Message>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            notifications: notif,
+            mqtt_client: Client::new(paho_mqtt::CreateOptionsBuilder::new().finalize()).unwrap(),
+            notifications: None,
             msg_queue: VecDeque::new(),
+            server: String::from("mqtt.eclipseprojects.io"),
+            topic: String::from("nimbus/modular_sensor_platform"),
             current_display: Display::MESSAGES,
             presence_res: vec![8, 8],
             pressure_res: vec![2, 2],
@@ -151,6 +160,39 @@ impl App {
             [width as usize, height as usize],
             interpolated.as_bytes()
         );
+    }
+
+    ///UI for the reconnecting screen
+    fn connect_screen(&mut self, ui: &mut egui::Ui) -> paho_mqtt::Result<()> {
+
+        ui.vertical_centered(|ui| {
+            ui.set_width(250.0);
+            ui.horizontal(|ui| {
+                ui.set_width(250.0);
+                ui.label("Server URI : ");
+                ui.text_edit_singleline(&mut self.server);
+            });
+        });
+
+        ui.vertical_centered(|ui| {
+            ui.set_width(250.0);
+            ui.horizontal(|ui| {
+                ui.set_width(250.0);
+                ui.label("Topic : ");
+                ui.text_edit_singleline(&mut self.topic);
+            });
+        });
+
+        ui.add_space(20.0);
+
+        if ui.button("Connect").clicked() {
+            ui.heading(format!("Connecting to MQTT server at\n'{}'\non topic\n'{}'...", self.server, self.topic));
+            ui.ctx().request_repaint();
+            self.connect()
+        }
+        else {
+            Ok(())
+        }
     }
 
     /// UI for the Presence screen
@@ -333,58 +375,93 @@ impl App {
 impl eframe::App for App {
    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 
-       self.recv();
-
        egui::TopBottomPanel::top("top").show(ctx, |ui| {
            ui.vertical_centered(|inner_ui| {
                inner_ui.heading("Modular Sensor Platform");
            });
-        });
+       });
 
-       egui::CentralPanel::default().show(ctx, |ui| {
-           egui::menu::bar(ui, |inner_ui| {
-               if inner_ui.button("Messages").clicked() {
-                   self.current_display = Display::MESSAGES;
-               }
-               if inner_ui.button("Pressure").clicked() {
-                   self.current_display = Display::PRESSURE;
-               }
-               if inner_ui.button("Presence").clicked() {
-                   self.current_display = Display::PRESENCE;
-               }
-               if inner_ui.button("Cross View").clicked() {
-                   self.current_display = Display::BOTH;
-               }
-               if inner_ui.button("Settings").clicked() {
-                   self.current_display = Display::SETTINGS;
-               }
-           });
-           ui.separator();
-
-           match self.current_display {
-               Display::MESSAGES => {
+       if self.notifications.is_some() {
+           if !self.mqtt_client.is_connected() {
+               egui::TopBottomPanel::bottom("errors").show(ctx, |ui| {
                    ui.add_space(5.0);
-                   ui.strong("Message log");
-                   ui.add_space(5.0);
-                   egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-                       for state in self.msg_queue.clone() {
-                           ui.label(format!("id: {:?}\npressure: {:?}\npresence: {:?}\n", state.id, state.pressure, state.presence));
-                           ui.separator();
+                   ui.horizontal(|ui| {
+                       ui.label(format!("Disconnected from MQTT server, attempting to reconnect..."));
+                       if self.mqtt_client.reconnect().is_ok() {
+                           ui.label(" Connection restored.");
                        }
                    });
-               },
-               Display::PRESSURE => self.pressure_screen(ui),
-               Display::PRESENCE => self.presence_screen(ui),
-               Display::BOTH => self.crossview_screen(ui),
-               Display::SETTINGS => self.settings_screen(ui)
-           };
-           
-           ui.ctx().request_repaint();
-       });
+               });
+           }
+           else {
+               if !self.recv() {
+                   egui::TopBottomPanel::bottom("errors").show(ctx, |ui| {
+                       ui.add_space(5.0);
+                       ui.label(format!("MQTT channel disconnected"));
+                   });
+               }
+           }
+
+           egui::CentralPanel::default().show(ctx, |ui| {
+               
+               egui::menu::bar(ui, |inner_ui| {
+                   if inner_ui.button("Messages").clicked() {
+                       self.current_display = Display::MESSAGES;
+                   }
+                   if inner_ui.button("Pressure").clicked() {
+                       self.current_display = Display::PRESSURE;
+                   }
+                   if inner_ui.button("Presence").clicked() {
+                       self.current_display = Display::PRESENCE;
+                   }
+                   if inner_ui.button("Cross View").clicked() {
+                       self.current_display = Display::BOTH;
+                   }
+                   if inner_ui.button("Settings").clicked() {
+                       self.current_display = Display::SETTINGS;
+                   }
+               });
+               ui.separator();
+
+               match self.current_display {
+                   Display::MESSAGES => {
+                       ui.add_space(5.0);
+                       ui.strong("Message log");
+                       ui.add_space(5.0);
+                       egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
+                           for state in self.msg_queue.clone() {
+                               ui.label(format!("id: {:?}\npressure: {:?}\npresence: {:?}\n", state.id, state.pressure, state.presence));
+                               ui.separator();
+                           }
+                       });
+                   },
+                   Display::PRESSURE => self.pressure_screen(ui),
+                   Display::PRESENCE => self.presence_screen(ui),
+                   Display::BOTH => self.crossview_screen(ui),
+                   Display::SETTINGS => self.settings_screen(ui)
+               };
+               ui.ctx().request_repaint();
+           });
+       }
+       else {
+           let mut conn_res = Ok(());
+           egui::CentralPanel::default().show(ctx, |ui| {
+               ui.add_space(100.0);
+               ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                   conn_res = self.connect_screen(ui);
+               });
+               ui.ctx().request_repaint();
+           });
+           egui::TopBottomPanel::bottom("errors").show(ctx, |ui| {
+               if let Err(conn_err) = conn_res {
+                   ui.label(format!("Connection error : {conn_err:?}"));
+               }
+           });
+       }
    }
 }
 
-/// Maps a `float` value to a color on the spectrum, using the HSV colorspace.
+/// Maps a `float` value to a RGB color on the spectrum, using the HSV colorspace.
 pub fn spectrum(value: f32) -> image::Rgb<u8> {
     let rgba = colours::Rgba::from(colours::Hsva::new(
         value / 256.0,
