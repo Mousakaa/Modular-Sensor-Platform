@@ -195,6 +195,29 @@ impl App {
         }
     }
 
+    /// UI for the message log screen
+    fn log_screen(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(5.0);
+        ui.strong("Message log");
+        ui.add_space(5.0);
+        egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
+            for state in self.msg_queue.clone() {
+                ui.label(format!(
+                    "Message received from sensor {} :\nSent at {}\nArrived at {}\nContaining :\n\t- {} pressure values\n\t- {} presence values\n",
+                    state.id,
+                    state.timestamp.time(),
+                    match state.received {
+                        Some(datetime) => datetime.time().to_string(),
+                        None => String::from("???")
+                    },
+                    state.pressure.len(),
+                    state.presence.len()
+                ));
+                ui.separator();
+            }
+        });
+    }
+
     /// UI for the Presence screen
     fn presence_screen(&mut self, ui: &mut egui::Ui) {
         let ratio = self.presence_img.width() as f32 / self.presence_img.height() as f32;
@@ -424,17 +447,7 @@ impl eframe::App for App {
                ui.separator();
 
                match self.current_display {
-                   Display::MESSAGES => {
-                       ui.add_space(5.0);
-                       ui.strong("Message log");
-                       ui.add_space(5.0);
-                       egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-                           for state in self.msg_queue.clone() {
-                               ui.label(format!("id: {:?}\npressure: {:?}\npresence: {:?}\n", state.id, state.pressure, state.presence));
-                               ui.separator();
-                           }
-                       });
-                   },
+                   Display::MESSAGES => self.log_screen(ui),
                    Display::PRESSURE => self.pressure_screen(ui),
                    Display::PRESENCE => self.presence_screen(ui),
                    Display::BOTH => self.crossview_screen(ui),

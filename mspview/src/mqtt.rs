@@ -1,13 +1,16 @@
-//extern crate json;
-
 use paho_mqtt::MQTT_VERSION_5;
+use serde::{Serialize, Deserialize};
+use serde_json;
+use chrono;
 
 use crate::App;
 
 /// Defines the values of a sensor tile at a given time.
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SensorState {
     pub id: u8,
+    pub timestamp: chrono::DateTime<chrono::Local>,
+    pub received: Option<chrono::DateTime<chrono::Local>>,
     pub pressure: Vec<f64>,
     pub presence: Vec<f32>
 }
@@ -16,16 +19,10 @@ impl SensorState {
 
     /// Parses a [`String`] received through MQTT to populate and return an instance of
     /// [`SensorState`].
-    pub fn from(s: String) -> json::Result<Self> {
-        match json::parse(s.as_str()) {
-            Ok(data) => {
-                Ok(Self {
-                    id: data["id"].as_u8().unwrap_or(0),
-                    pressure: data["pressure"].members().map(|val| val.as_f64().unwrap_or(0.0)).collect(),
-                    presence: data["presence"].members().map(|val| val.as_f32().unwrap_or(0.0)).collect()
-                })},
-            Err(err) => Err(err)
-        }
+    pub fn from(s: String) -> serde_json::Result<Self> {
+        let mut state: SensorState = serde_json::from_str(s.as_str())?;
+        state.received = Some(chrono::Local::now());
+        Ok(state)
     }
 }
 
