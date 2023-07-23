@@ -443,6 +443,11 @@ impl eframe::App for App {
                    if inner_ui.button("Settings").clicked() {
                        self.current_display = Display::SETTINGS;
                    }
+                   inner_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                       if ui.button("Disconnect").clicked() {
+                           self.notifications = None;
+                       }
+                   });
                });
                ui.separator();
 
