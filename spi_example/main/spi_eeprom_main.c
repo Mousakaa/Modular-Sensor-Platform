@@ -47,7 +47,13 @@
 #define LSL_MSB_SETUP_ADDR 1220
 #define DHT_SETUP_ADDR 1222
 
-static const uint16_t KEY_DATA_BLOCK_ADDR[Y_LEN][X_LEN] = {
+#define CMD_CALIBRATE_ALL 0xff
+#define CMD_ENABLE_WRITE_SETUP 0xfe
+#define CMD_REQUEST_FREQ_HOP 0xfc
+#define CMD_REQUEST_SLEEP 0xfb
+#define CMD_FORCE_RESET 0x40
+
+static const uint16_t KEY_DATA_BLOCK_ADDR[8][8] = {
 	{ 26,  90, 154, 218, 282, 346, 410, 474 },
 	{ 34,  98, 162, 226, 290, 354, 418, 482 },
 	{ 42, 106, 170, 234, 298, 362, 426, 490 },
@@ -218,8 +224,8 @@ void at42qt_get_values(spi_device_handle_t device, uint16_t* values) {
 	}
 }
 
-void at42qt_recalibrate(spi_device_handle_t device) {
-	uint8_t command = 0xff;
+void at42qt_send_command(spi_device_handle_t device, uint8_t cmd) {
+	uint8_t command = cmd;
 	at42qt_spi_write(device, COMMAND_ADDR, &command, 1);
 }
 
@@ -229,7 +235,7 @@ void app_main(void) {
 	uint16_t values[X_LEN*Y_LEN];
 
 	at42qt_spi_init(&device);
-	at42qt_recalibrate(device);
+	at42qt_send_command(device, CMD_CALIBRATE_ALL);
 
 	while(1) {
 		at42qt_get_values(device, values);
