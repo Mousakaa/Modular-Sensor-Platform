@@ -15,6 +15,10 @@ Ideally, the prototype would be comprised of several tiles interacting to form t
 
 -- WIP --
 
+### Embedded programming
+
+This repository contains the [code for the device](mspsensor).
+
 ### User interface
 
-This repository contains the [code to the UI](mspview)
+This repository also contains the [code to the UI](mspview).
