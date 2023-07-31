@@ -1,4 +1,18 @@
-menu "Example Configuration"
+menu "MSP Sensor Configuration"
+
+	config X_LEN
+		int "Vertical presence resolution"
+		range 1 8
+		default 8
+
+	config Y_LEN
+		int "Horizontal presence resolution"
+		range 1 8
+		default 8
+
+endmenu
+
+menu "MSP Network Configuration"
 
     config MESH_CHANNEL
         int "channel"

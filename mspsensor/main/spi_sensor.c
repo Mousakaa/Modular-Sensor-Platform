@@ -1,28 +1,33 @@
-/* SPI Master Half Duplex EEPROM example.
+/* SPI driver for AT42QT2640 sensor chip
+ * Author : Arthur Gaudard - 2023
+ *
  * Key layout :
- *    Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7
- * X0  0  8 16 24 32 40 48 56
- * X1  1  9 17 25 33 41 49 57
- * X2  2 10 18 26 34 42 50 58
- * X3  3 11 19 27 35 43 51 59
- * X4  4 12 20 28 36 44 52 60
- * X5  5 13 21 29 37 45 53 61
- * X6  6 14 22 30 38 46 54 62
- * X7  7 15 23 31 39 47 55 63
+ *
+ *            Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7
+ *         X0  0  8 16 24 32 40 48 56
+ *         X1  1  9 17 25 33 41 49 57
+ *         X2  2 10 18 26 34 42 50 58
+ *         X3  3 11 19 27 35 43 51 59
+ *         X4  4 12 20 28 36 44 52 60
+ *         X5  5 13 21 29 37 45 53 61
+ *         X6  6 14 22 30 38 46 54 62
+ *         X7  7 15 23 31 39 47 55 63
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/spi_master.h"
 #include "driver/gpio.h"
 
 #include "sdkconfig.h"
 #include "esp_log.h"
+#include "spi_sensor.h"
 
 #define SPI_CLOCK_FREQ 1000000 //1MHz (<4MHz)
 
+// Pin layout
 #define PIN_NUM_RST  2
 #define PIN_NUM_CS   3
 #define PIN_NUM_CH   4
@@ -31,9 +36,7 @@
 #define PIN_NUM_MISO 9
 #define PIN_NUM_MOSI 10
 
-#define X_LEN 8
-#define Y_LEN 7
-
+// Internal registers and address blocks
 #define ID_ADDR 0
 #define FAIL_CNT_ADDR 3
 #define DEVICE_STATUS_ADDR 5
@@ -51,14 +54,10 @@
 #define DHT_SETUP_ADDR 1222
 #define HCRC_LSB_SETUP_ADDR 1246
 #define HCRC_MSB_SETUP_ADDR 1247
-#define SETUP_SIZE 477
+#define SETUP_SIZE 477 // Size of the setup block (in bytes) without the 2 final CRC bytes
 
-#define CMD_CALIBRATE_ALL 0xff
-#define CMD_ENABLE_WRITE_SETUP 0xfe
-#define CMD_REQUEST_FREQ_HOP 0xfc
-#define CMD_REQUEST_SLEEP 0xfb
-#define CMD_FORCE_RESET 0x40
-
+// Addresses of the per-key registers (8 bytes per key)
+// Call like this : KEY_DATA_BLOCK_ADDR[y][x]
 static const uint16_t KEY_DATA_BLOCK_ADDR[8][8] = {
 	{ 26,  90, 154, 218, 282, 346, 410, 474 },
 	{ 34,  98, 162, 226, 290, 354, 418, 482 },
@@ -72,6 +71,7 @@ static const uint16_t KEY_DATA_BLOCK_ADDR[8][8] = {
 
 static const char TAG[] = "main";
 
+// CRC computing algorithm from AT42QT2640 datasheet
 uint16_t sixteen_bit_crc(uint16_t crc, uint8_t data) {
 	uint8_t index;// shift counter
 	crc ^= (uint16_t)(data) << 8;
@@ -87,11 +87,13 @@ uint16_t sixteen_bit_crc(uint16_t crc, uint8_t data) {
 	return crc;
 }
 
+// Blocks while DRDY is low
 void at42qt_spi_wait_for_ready(void) {
 	vTaskDelay(0.1 / portTICK_PERIOD_MS);
 	while(!gpio_get_level(PIN_NUM_DRDY));
 }
 
+// Blocks while nothing happens (doesn't work for some reason)
 void at42qt_spi_wait_for_change(void) {
 	if(!gpio_get_level(PIN_NUM_CH)) {
 		while(!gpio_get_level(PIN_NUM_CH));
@@ -99,6 +101,8 @@ void at42qt_spi_wait_for_change(void) {
 	while(gpio_get_level(PIN_NUM_CH));
 }
 
+// Sends a byte of data to the device on the MOSI line, and simultaneously reads a byte
+// on the MISO line.
 void at42qt_spi_transmit_byte(spi_device_handle_t device, uint8_t send, uint8_t* receive) {
 	spi_transaction_t transaction = {
 		.length = 8,
@@ -111,6 +115,8 @@ void at42qt_spi_transmit_byte(spi_device_handle_t device, uint8_t send, uint8_t*
 	ESP_ERROR_CHECK(spi_device_transmit(device, &transaction));
 }
 
+// Writes `n` bytes of data to the AT42QT2640, starting at the address `addr`
+// (which is a 12-byte integer). `n` must be smaller than 512.
 void at42qt_spi_write(spi_device_handle_t device, uint16_t addr, uint8_t* data, size_t n) {
 	at42qt_spi_transmit_byte(device, (uint8_t)addr, NULL);
 	at42qt_spi_transmit_byte(device, ((n & (uint16_t)(1<<8)) >> 2) | ((addr & (uint16_t)(0b111 << 8)) >> 8), NULL);
@@ -121,6 +127,9 @@ void at42qt_spi_write(spi_device_handle_t device, uint16_t addr, uint8_t* data, 
 	}
 }
 
+// Reads `n` bytes of data from the AT42QT2640, starting at the address `addr`
+// (which is a 12-byte integer). `n` must be smaller than 512.
+// The function return 1 if successful, 0 if the data is corrupted.
 uint8_t at42qt_spi_read(spi_device_handle_t device, uint16_t addr, uint8_t* data, size_t n) {
 	uint8_t crc_lsb;
 	uint8_t crc_msb;
@@ -151,6 +160,8 @@ uint8_t at42qt_spi_read(spi_device_handle_t device, uint16_t addr, uint8_t* data
 	return 1;
 }
 
+// Function to call directly after power-up or reset, to ensure the communication
+// has started.
 void at42qt_spi_wait_for_response(spi_device_handle_t device) {
 	uint8_t id = 0;
 
@@ -162,6 +173,7 @@ void at42qt_spi_wait_for_response(spi_device_handle_t device) {
 	}
 }
 
+// Hard reset of the AT42QT2640
 void at42qt_spi_reset(spi_device_handle_t device) {
 	ESP_LOGI(TAG, "Resetting...");
 	gpio_set_level(PIN_NUM_RST, 0);
@@ -171,6 +183,7 @@ void at42qt_spi_reset(spi_device_handle_t device) {
 	at42qt_spi_wait_for_response(device);
 }
 
+// Initialization of non-SPI pins
 void gpio_init() {
 	gpio_set_direction(PIN_NUM_DRDY, GPIO_MODE_INPUT);
 	gpio_set_intr_type(PIN_NUM_DRDY, GPIO_INTR_DISABLE);
@@ -185,6 +198,7 @@ void gpio_init() {
 	gpio_set_pull_mode(PIN_NUM_RST, GPIO_PULLUP_ENABLE);
 }
 
+// SPI bus initialization
 void at42qt_spi_init(spi_device_handle_t* device) {
     esp_err_t ret;
 
@@ -198,7 +212,7 @@ void at42qt_spi_init(spi_device_handle_t* device) {
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
     };
-    //Initialize the SPI bus
+
     ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
     ESP_ERROR_CHECK(ret);
 
@@ -216,14 +230,18 @@ void at42qt_spi_init(spi_device_handle_t* device) {
 
 	ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &devcfg, device));
 
+	// Reset
 	at42qt_spi_reset(*device);
 }
 
+// Send a command to the AT42QT2640
 void at42qt_send_command(spi_device_handle_t device, uint8_t cmd) {
 	uint8_t command = cmd;
 	at42qt_spi_write(device, COMMAND_ADDR, &command, 1);
 }
 
+// Check relevent registers for various errors. Recalibrates all keys if a calibration error
+// is encountered
 void at42qt_check_errors(spi_device_handle_t device, uint8_t* prev_errors) {
 	uint8_t error_cnt;
 	uint8_t status;
@@ -253,6 +271,7 @@ void at42qt_check_errors(spi_device_handle_t device, uint8_t* prev_errors) {
 	}
 }
 
+// AT42QT2640 setup. Writes in internal EEPROM, so this setup is persistent.
 void at42qt_setup(spi_device_handle_t device) {
 	uint16_t crc = 0;
 	uint8_t setup_block[SETUP_SIZE + 2];
@@ -263,7 +282,7 @@ void at42qt_setup(spi_device_handle_t device) {
 	for(uint8_t y = 0; y < 8; y++) {
 		for(uint8_t x = 0; x < 8; x++) {
 			// Disable unused keys
-			if(x >= X_LEN || y >= Y_LEN) {
+			if(x >= CONFIG_X_LEN || y >= CONFIG_Y_LEN) {
 				setup_block[DIL_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] &= 0xf << 4;
 			}
 			// Disable automatic recalibration
@@ -282,53 +301,34 @@ void at42qt_setup(spi_device_handle_t device) {
 	// WRITE TO DEVICE
 	at42qt_send_command(device, CMD_ENABLE_WRITE_SETUP);
 	at42qt_spi_write(device, SETUP_BLOCK_ADDR, setup_block, SETUP_SIZE + 2);
+
+	// RESET
+	at42qt_spi_reset(device);
 }
 
+// Reads the status of each key in the array (0 for untouched and 1 for touched), and stores it
+// in `values`.
 void at42qt_get_status(spi_device_handle_t device, uint8_t* values) {
 	uint8_t val;
-	for(uint8_t y = 0; y < Y_LEN; y++) {
+	for(uint8_t y = 0; y < CONFIG_Y_LEN; y++) {
 		if(at42qt_spi_read(device, DETECT_BLOCK_ADDR + y, &val, 1)) {
-			for(uint8_t x = 0; x < X_LEN; x++) {
-				values[y+x*Y_LEN] = (val & (1 << x)) >> x;
+			for(uint8_t x = 0; x < CONFIG_X_LEN; x++) {
+				values[y+x*CONFIG_Y_LEN] = (val & (1 << x)) >> x;
 			}
 		}
 	}
 }
 
-void at42qt_get_values(spi_device_handle_t device, uint16_t* values) {
-	uint8_t val[2];
-	for(uint8_t y = 0; y < Y_LEN; y++) {
-		for(uint8_t x = 0; x < X_LEN; x++) {
+// Reads the raw measurements of every key (on 13 bits), and stores the signed difference
+// between each key's measurement and its reference value into `values`.
+void at42qt_get_values(spi_device_handle_t device, int16_t* values) {
+	uint8_t val[4];
+	for(uint8_t y = 0; y < CONFIG_Y_LEN; y++) {
+		for(uint8_t x = 0; x < CONFIG_X_LEN; x++) {
 			if(at42qt_spi_read(device, KEY_DATA_BLOCK_ADDR[y][x], val, 2)) {
-				values[y+x*Y_LEN] = ((uint16_t)(val[1] & 0b11111) << 8) | val[0];
+				values[y+x*CONFIG_Y_LEN] = (((int16_t)(val[1] & 0b11111) << 8) | val[0])
+								  - (((int16_t)(val[3] & 0b11111) << 8) | val[2]);
 			}
 		}
-	}
-}
-
-void app_main(void) {
-	spi_device_handle_t device;
-	uint8_t error_cnt = 0;
-
-	uint8_t values[X_LEN*Y_LEN];
-
-	at42qt_spi_init(&device);
-	at42qt_setup(device);
-	at42qt_send_command(device, CMD_CALIBRATE_ALL);
-
-	while(1) {
-		at42qt_get_status(device, values);
-		at42qt_check_errors(device, &error_cnt);
-		ESP_LOGI(TAG, "\033[2K\033[20D\tY0\tY1\tY2\tY3\tY4\tY5\tY6");
-		ESP_LOGI(TAG, "\033[2K\033[20DX0\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
-		ESP_LOGI(TAG, "\033[2K\033[20DX1\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[7], values[8], values[9], values[10], values[11], values[12], values[13]);
-		ESP_LOGI(TAG, "\033[2K\033[20DX2\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[14], values[15], values[16], values[17], values[18], values[19], values[20]);
-		ESP_LOGI(TAG, "\033[2K\033[20DX3\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[21], values[22], values[23], values[24], values[25], values[26], values[27]);
-		ESP_LOGI(TAG, "\033[2K\033[20DX4\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[28], values[29], values[30], values[31], values[32], values[33], values[34]);
-		ESP_LOGI(TAG, "\033[2K\033[20DX5\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[35], values[36], values[37], values[38], values[39], values[40], values[41]);
-		ESP_LOGI(TAG, "\033[2K\033[20DX6\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[42], values[43], values[44], values[45], values[46], values[47], values[48]);
-		ESP_LOGI(TAG, "\033[2K\033[20DX7\t%d\t%d\t%d\t%d\t%d\t%d\t%d", values[49], values[50], values[51], values[52], values[53], values[54], values[55]);
-		vTaskDelay(100 / portTICK_PERIOD_MS);
-		ESP_LOGI(TAG, "\033[10A");
 	}
 }
