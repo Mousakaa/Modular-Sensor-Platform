@@ -55,7 +55,7 @@ pub struct App {
     /// Interpolation resolution increase ratio
     inter_size: u32,
     /// Value of the threshold to detect presence
-    threshold: f32
+    threshold: u8
 }
 
 impl App {
@@ -76,7 +76,7 @@ impl App {
             pressure_img: image::RgbImage::new(4, 4),
             interpolation: image::imageops::Nearest,
             inter_size: 160,
-            threshold: 128.0
+            threshold: 128
         }
     }
 
@@ -89,7 +89,7 @@ impl App {
 
                 let color = if self.pressure_res[0]*self.pressure_res[1] == state.pressure.len() {
                     let value = state.pressure[s_x as usize + s_y as usize * self.pressure_res[0] ];
-                    spectrum(value as f32)
+                    spectrum(value as u8)
                 }
                 else {
                     image::Rgb([0; 3])
@@ -109,7 +109,7 @@ impl App {
 
                 let color = if self.presence_res[0]*self.presence_res[1] == state.presence.len() {
                     let value = state.presence[s_x as usize + s_y as usize * self.presence_res[0] ];
-                    spectrum(value)
+                    spectrum((value.abs() / 8) as u8)
                 }
                 else {
                     image::Rgb([0; 3])
@@ -307,7 +307,7 @@ impl App {
             ui.radio_value(&mut self.interpolation, image::imageops::Gaussian, "Gaussian");
             ui.radio_value(&mut self.interpolation, image::imageops::Lanczos3, "Lanczos 3");
         });
-        ui.add(egui::Slider::new(&mut self.threshold, std::ops::RangeInclusive::new(0.0, 256.0)).text("Presence detection threshold"));
+        ui.add(egui::Slider::new(&mut self.threshold, 0..=255).text("Presence detection threshold"));
 
         ui.add_space(5.0);
         ui.separator();
@@ -480,9 +480,9 @@ impl eframe::App for App {
 }
 
 /// Maps a `float` value to a RGB color on the spectrum, using the HSV colorspace.
-pub fn spectrum(value: f32) -> image::Rgb<u8> {
+pub fn spectrum(value: u8) -> image::Rgb<u8> {
     let rgba = colours::Rgba::from(colours::Hsva::new(
-        value / 256.0,
+        value as f32 / 256.0,
         1.0,
         1.0,
         1.0
@@ -492,8 +492,8 @@ pub fn spectrum(value: f32) -> image::Rgb<u8> {
 
 
 /// Reverts back from the color to the value it codes for.
-pub fn value_from(color: egui::Color32) -> f32 {
+pub fn value_from(color: egui::Color32) -> u8 {
     let rgba: colours::Rgba<f32> = colours::Rgba::new(color.r(), color.g(), color.b(), color.a()).into();
     let hsva: colours::Hsva<f32> = rgba.into();
-    return hsva.hue * 255.0;
+    return (hsva.hue * 255.0) as u8;
 }
