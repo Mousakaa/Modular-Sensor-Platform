@@ -69,14 +69,14 @@ impl App {
             current_display: Display::MESSAGES,
             presence_res: vec![8, 8],
             pressure_res: vec![2, 2],
-            nb_sensors: 4,
-            lins: 2,
-            cols: 2,
-            presence_img: image::RgbImage::new(16, 16),
-            pressure_img: image::RgbImage::new(4, 4),
+            nb_sensors: 1,
+            lins: 1,
+            cols: 1,
+            presence_img: image::RgbImage::new(8, 8),
+            pressure_img: image::RgbImage::new(2, 2),
             interpolation: image::imageops::Nearest,
-            inter_size: 160,
-            threshold: 128
+            inter_size: 80,
+            threshold: 80
         }
     }
 
@@ -207,7 +207,7 @@ impl App {
                     state.id,
                     state.timestamp.time(),
                     match state.received {
-                        Some(datetime) => datetime.time().to_string(),
+                        Some(datetime) => datetime.time().format("%H:%M:%S").to_string(),
                         None => String::from("???")
                     },
                     state.pressure.len(),
@@ -276,11 +276,16 @@ impl App {
 
         for i in 0..crossview.pixels.len() {
             crossview.pixels[i] = if value_from(crossview.pixels[i]) >= self.threshold {
-                pressure.pixels[i]
+                if i < pressure.pixels.len() {
+                    pressure.pixels[i]
+                }
+                else {
+                    egui::Color32::WHITE
+                }
             }
             else {
                 egui::Color32::BLACK
-            };
+            }
         }
 
         let texture = ui.ctx().load_texture(
