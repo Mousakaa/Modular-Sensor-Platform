@@ -8,7 +8,7 @@
 #include "esp_log.h"
 #include "i2c_sensor.h"
 
-static const char *TAG = "i2c-sensor";
+static const char *TAG = "FDC1004";
 
 #define I2C_MASTER_SCL_IO           7		//GPIO number used for I2C master clock
 #define I2C_MASTER_SDA_IO           6		//GPIO number used for I2C master data

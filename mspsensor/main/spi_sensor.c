@@ -69,7 +69,7 @@ static const uint16_t KEY_DATA_BLOCK_ADDR[8][8] = {
 	{ 82, 146, 210, 274, 338, 402, 466, 530 }
 };
 
-static const char TAG[] = "main";
+static const char TAG[] = "AT42QT2640";
 
 // CRC computing algorithm from AT42QT2640 datasheet
 uint16_t sixteen_bit_crc(uint16_t crc, uint8_t data) {

@@ -22,7 +22,7 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            if (esp_mqtt_client_subscribe(s_client, "/topic/ip_mesh/key_pressed", 0) < 0) {
+            if (esp_mqtt_client_subscribe(s_client, "nimbus/modular_sensor_platform", 0) < 0) {
                 // Disconnect to retry the subscribe after auto-reconnect timeout
                 esp_mqtt_client_disconnect(s_client);
             }

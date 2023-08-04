@@ -8,6 +8,8 @@
 */
 #include <string.h>
 #include <inttypes.h>
+#include <time.h>
+#include "esp_netif_sntp.h"
 #include "esp_wifi.h"
 #include "esp_mac.h"
 #include "esp_event.h"
@@ -17,6 +19,8 @@
 #include "mesh_netif.h"
 #include "driver/gpio.h"
 #include "freertos/semphr.h"
+#include "i2c_sensor.h"
+#include "spi_sensor.h"
 
 /*******************************************************
  *                Macros
@@ -59,15 +63,22 @@ void mqtt_app_publish(char* topic, char *publish_string);
  *                Function Definitions
  *******************************************************/
 
-static void initialise_button(void)
-{
-    gpio_config_t io_conf = {0};
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.pin_bit_mask = BIT64(EXAMPLE_BUTTON_GPIO);
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = 1;
-    io_conf.pull_down_en = 0;
-    gpio_config(&io_conf);
+void float_array_to_str(float* array, char* str, uint8_t len) {
+	char number[20];
+	str[0] = '\0';
+	for(uint8_t i = 0; i < len; i++) {
+		sprintf(number, "%s%f", i?", ":"", array[i]);
+		strcat(str, number);
+	}
+}
+
+void int_array_to_str(int16_t* array, char* str, uint8_t len) {
+	char number[20];
+	str[0] = '\0';
+	for(uint8_t i = 0; i < len; i++) {
+		sprintf(number, "%s%d", i?", ":"", array[i]);
+		strcat(str, number);
+	}
 }
 
 void static recv_cb(mesh_addr_t *from, mesh_data_t *data)
@@ -91,49 +102,87 @@ void static recv_cb(mesh_addr_t *from, mesh_data_t *data)
             ESP_LOGE(MESH_TAG, "Error in receiving raw mesh data: Unexpected size");
             return;
         }
-        ESP_LOGW(MESH_TAG, "Keypressed detected on node: "
+        ESP_LOGI(MESH_TAG, "Message sent by node: "
                 MACSTR, MAC2STR(data->data + 1));
     } else {
         ESP_LOGE(MESH_TAG, "Error in receiving raw mesh data: Unknown command");
     }
 }
 
-static void check_button(void* args)
+static void sensor_info(void* args)
 {
-    static bool old_level = true;
-    bool new_level;
-    bool run_check_button = true;
-    initialise_button();
-    while (run_check_button) {
-        new_level = gpio_get_level(EXAMPLE_BUTTON_GPIO);
-        if (!new_level && old_level) {
-            if (true/*s_route_table_size && !esp_mesh_is_root()*/) {
-                ESP_LOGW(MESH_TAG, "Key pressed!");
-                mesh_data_t data;
-                uint8_t *my_mac = mesh_netif_get_station_mac();
-                uint8_t data_to_send[6+1] = { CMD_KEYPRESSED, };
-                esp_err_t err;
-                char print[6*3+1]; // MAC addr size + terminator
-                memcpy(data_to_send + 1, my_mac, 6);
-                data.size = 7;
-                data.proto = MESH_PROTO_BIN;
-                data.tos = MESH_TOS_P2P;
-                data.data = data_to_send;
-                snprintf(print, sizeof(print),MACSTR, MAC2STR(my_mac));
-                mqtt_app_publish("/topic/ip_mesh/key_pressed", print);
-                xSemaphoreTake(s_route_table_lock, portMAX_DELAY);
-                for (int i = 0; i < s_route_table_size; i++) {
-                    if (MAC_ADDR_EQUAL(s_route_table[i].addr, my_mac)) {
-                        continue;
-                    }
-                    err = esp_mesh_send(&s_route_table[i], &data, MESH_DATA_P2P, NULL, 0);
-                    ESP_LOGI(MESH_TAG, "Sending to [%d] "
-                            MACSTR ": sent with err code: %d", i, MAC2STR(s_route_table[i].addr), err);
-                }
-                xSemaphoreGive(s_route_table_lock);
-            }
-        }
-        old_level = new_level;
+	uint8_t spi_errors = 0;
+	spi_device_handle_t device;
+
+	time_t date;
+	char* print = malloc(700*sizeof(char));
+	char* date_str = malloc(30*sizeof(char));
+	char* pressure_str = malloc(100*sizeof(char));
+	char* presence_str = malloc(500*sizeof(char));
+
+	float pressure_offset[4] = { 0.0 };
+	float pressure[4] = { 0.0 };
+	int16_t presence[CONFIG_X_LEN * CONFIG_Y_LEN];
+
+	// Set current time from SNTP server
+	setenv("TZ", "UTC+1", 1);
+	tzset();
+
+	esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+	esp_netif_sntp_init(&config);
+
+	if(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) != ESP_OK) {
+		printf("Failed to update system time within 10s timeout");
+	}
+
+	// Inits
+	i2c_master_init();
+	at42qt_spi_init(&device);
+	at42qt_setup(device);
+
+    while(1) {
+		at42qt_check_errors(device, &spi_errors);
+
+		for(uint8_t i = 0; i < 4; i++) {
+			fdc1004_measure(i+1, pressure_offset[i], &(pressure[i]));
+		}
+
+		at42qt_get_values(device, presence);
+
+		float_array_to_str(pressure, pressure_str, 4);
+		int_array_to_str(presence, presence_str, CONFIG_X_LEN*CONFIG_Y_LEN);
+
+		time(&date);
+		strftime(date_str, 30, "+%Y-%m-%dT%H:%M:%S%z", localtime(&date));
+
+		sprintf(print, "{\"id\":0, \"timestamp\":\"%s\", \"pressure\":[%s],\"presence\":[%s]}", date_str, pressure_str, presence_str);
+
+		mqtt_app_publish("nimbus/modular_sensor_platform", print);
+
+		if (s_route_table_size && !esp_mesh_is_root()) {
+			mesh_data_t data;
+			uint8_t *my_mac = mesh_netif_get_station_mac();
+			uint8_t data_to_send[6+1] = { CMD_KEYPRESSED, };
+			esp_err_t err;
+			char print[6*3+1]; // MAC addr size + terminator
+			memcpy(data_to_send + 1, my_mac, 6);
+			data.size = 7;
+			data.proto = MESH_PROTO_BIN;
+			data.tos = MESH_TOS_P2P;
+			data.data = data_to_send;
+			snprintf(print, sizeof(print),MACSTR, MAC2STR(my_mac));
+			mqtt_app_publish("nimbus/modular_sensor_platform/ip_mesh", print);
+			xSemaphoreTake(s_route_table_lock, portMAX_DELAY);
+			for (int i = 0; i < s_route_table_size; i++) {
+				if (MAC_ADDR_EQUAL(s_route_table[i].addr, my_mac)) {
+					continue;
+				}
+				err = esp_mesh_send(&s_route_table[i], &data, MESH_DATA_P2P, NULL, 0);
+				ESP_LOGI(MESH_TAG, "Sending to [%d] "
+						MACSTR ": sent with err code: %d", i, MAC2STR(s_route_table[i].addr), err);
+			}
+			xSemaphoreGive(s_route_table_lock);
+		}
         vTaskDelay(50 / portTICK_PERIOD_MS);
     }
     vTaskDelete(NULL);
@@ -151,7 +200,7 @@ void esp_mesh_mqtt_task(void *arg)
     while (is_running) {
         asprintf(&print, "layer:%d IP:" IPSTR, esp_mesh_get_layer(), IP2STR(&s_current_ip));
         ESP_LOGI(MESH_TAG, "Tried to publish %s", print);
-        mqtt_app_publish("/topic/ip_mesh", print);
+        mqtt_app_publish("nimbus/modular_sensor_platform/ip_mesh", print);
         free(print);
         if (esp_mesh_is_root()) {
             esp_mesh_get_routing_table((mesh_addr_t *) &s_route_table,
@@ -181,7 +230,7 @@ esp_err_t esp_mesh_comm_mqtt_task_start(void)
 
     if (!is_comm_mqtt_task_started) {
         xTaskCreate(esp_mesh_mqtt_task, "mqtt task", 3072, NULL, 5, NULL);
-        xTaskCreate(check_button, "check button task", 3072, NULL, 5, NULL);
+        xTaskCreate(sensor_info, "sensor task", 3072, NULL, 5, NULL);
         is_comm_mqtt_task_started = true;
     }
     return ESP_OK;
