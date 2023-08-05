@@ -49,3 +49,5 @@ The important settings are located in the `MSP Sensor Configuration` and `MSP Ne
 * In `MSP Sensor Configuration`, you can set the vertical and horizontal resolutions of the presence sensor array.
 
 * In `MSP Network Configuration`, you can setup the wifi router info and the size of your wifi mesh, which depends on the number of devices you have.
+
+When you are done configuring, hit `q` to quit the manager and `y` to save the changes. It should then automatically build and flash the binary on the board.
