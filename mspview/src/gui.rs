@@ -55,7 +55,7 @@ pub struct App {
     /// Interpolation resolution increase ratio
     inter_size: u32,
     /// Value of the threshold to detect presence
-    threshold: f32
+    threshold: u8
 }
 
 impl App {
@@ -69,14 +69,14 @@ impl App {
             current_display: Display::MESSAGES,
             presence_res: vec![8, 8],
             pressure_res: vec![2, 2],
-            nb_sensors: 4,
-            lins: 2,
-            cols: 2,
-            presence_img: image::RgbImage::new(16, 16),
-            pressure_img: image::RgbImage::new(4, 4),
+            nb_sensors: 1,
+            lins: 1,
+            cols: 1,
+            presence_img: image::RgbImage::new(8, 8),
+            pressure_img: image::RgbImage::new(2, 2),
             interpolation: image::imageops::Nearest,
-            inter_size: 160,
-            threshold: 128.0
+            inter_size: 80,
+            threshold: 80
         }
     }
 
@@ -89,7 +89,7 @@ impl App {
 
                 let color = if self.pressure_res[0]*self.pressure_res[1] == state.pressure.len() {
                     let value = state.pressure[s_x as usize + s_y as usize * self.pressure_res[0] ];
-                    spectrum(value as f32)
+                    spectrum(value as u8)
                 }
                 else {
                     image::Rgb([0; 3])
@@ -109,7 +109,7 @@ impl App {
 
                 let color = if self.presence_res[0]*self.presence_res[1] == state.presence.len() {
                     let value = state.presence[s_x as usize + s_y as usize * self.presence_res[0] ];
-                    spectrum(value)
+                    spectrum((value.abs() / 8) as u8)
                 }
                 else {
                     image::Rgb([0; 3])
@@ -207,7 +207,7 @@ impl App {
                     state.id,
                     state.timestamp.time(),
                     match state.received {
-                        Some(datetime) => datetime.time().to_string(),
+                        Some(datetime) => datetime.time().format("%H:%M:%S").to_string(),
                         None => String::from("???")
                     },
                     state.pressure.len(),
@@ -276,11 +276,16 @@ impl App {
 
         for i in 0..crossview.pixels.len() {
             crossview.pixels[i] = if value_from(crossview.pixels[i]) >= self.threshold {
-                pressure.pixels[i]
+                if i < pressure.pixels.len() {
+                    pressure.pixels[i]
+                }
+                else {
+                    egui::Color32::WHITE
+                }
             }
             else {
                 egui::Color32::BLACK
-            };
+            }
         }
 
         let texture = ui.ctx().load_texture(
@@ -307,7 +312,7 @@ impl App {
             ui.radio_value(&mut self.interpolation, image::imageops::Gaussian, "Gaussian");
             ui.radio_value(&mut self.interpolation, image::imageops::Lanczos3, "Lanczos 3");
         });
-        ui.add(egui::Slider::new(&mut self.threshold, std::ops::RangeInclusive::new(0.0, 256.0)).text("Presence detection threshold"));
+        ui.add(egui::Slider::new(&mut self.threshold, 0..=255).text("Presence detection threshold"));
 
         ui.add_space(5.0);
         ui.separator();
@@ -480,9 +485,9 @@ impl eframe::App for App {
 }
 
 /// Maps a `float` value to a RGB color on the spectrum, using the HSV colorspace.
-pub fn spectrum(value: f32) -> image::Rgb<u8> {
+pub fn spectrum(value: u8) -> image::Rgb<u8> {
     let rgba = colours::Rgba::from(colours::Hsva::new(
-        value / 256.0,
+        value as f32 / 256.0,
         1.0,
         1.0,
         1.0
@@ -492,8 +497,8 @@ pub fn spectrum(value: f32) -> image::Rgb<u8> {
 
 
 /// Reverts back from the color to the value it codes for.
-pub fn value_from(color: egui::Color32) -> f32 {
+pub fn value_from(color: egui::Color32) -> u8 {
     let rgba: colours::Rgba<f32> = colours::Rgba::new(color.r(), color.g(), color.b(), color.a()).into();
     let hsva: colours::Hsva<f32> = rgba.into();
-    return hsva.hue * 255.0;
+    return (hsva.hue * 255.0) as u8;
 }

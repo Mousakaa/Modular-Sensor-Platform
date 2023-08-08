@@ -11,8 +11,8 @@ pub struct SensorState {
     pub id: u8,
     pub timestamp: chrono::DateTime<chrono::Local>,
     pub received: Option<chrono::DateTime<chrono::Local>>,
-    pub pressure: Vec<f64>,
-    pub presence: Vec<f32>
+    pub pressure: Vec<f32>,
+    pub presence: Vec<i16>
 }
 
 impl SensorState {
