@@ -22,7 +22,7 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            if (esp_mqtt_client_subscribe(s_client, "nimbus/modular_sensor_platform", 0) < 0) {
+            if (esp_mqtt_client_subscribe(s_client, CONFIG_MQTT_TOPIC, 0) < 0) {
                 // Disconnect to retry the subscribe after auto-reconnect timeout
                 esp_mqtt_client_disconnect(s_client);
             }
@@ -71,7 +71,7 @@ void mqtt_app_publish(char* topic, char *publish_string)
 void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-            .broker.address.uri = "mqtt://mqtt.eclipseprojects.io",
+            .broker.address.uri = CONFIG_MQTT_SERVER,
     };
 
     s_client = esp_mqtt_client_init(&mqtt_cfg);

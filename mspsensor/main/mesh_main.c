@@ -63,16 +63,30 @@ void mqtt_app_publish(char* topic, char *publish_string);
  *                Function Definitions
  *******************************************************/
 
-void float_array_to_str(float* array, char* str, uint8_t len) {
-	char number[20];
-	str[0] = '\0';
-	for(uint8_t i = 0; i < len; i++) {
-		sprintf(number, "%s%f", i?", ":"", array[i]);
-		strcat(str, number);
+void compute_weight(int32_t* pressure, int32_t* pressure_memory, uint8_t* weights) {
+	for(uint8_t ch = 0; ch < 4; ch++) {
+		int32_t avg = 0;
+		for(uint8_t i = 0; i < 10; i++) {
+			avg += pressure_memory[10*ch + i];
+		}
+		avg /= 10;
+		weights[ch] = pressure[ch] >= avg ? (uint8_t)((pressure[ch] - avg) / 4000) : 0; // TODO : Better weight calculation
+		for(uint8_t i = 0; i < 9; i++) {
+			pressure_memory[10*ch + i] = pressure_memory[10*ch + i+1];
+		}
+		// Fill memory at the beginning
+		if(pressure_memory[10*ch] == 0) {
+			pressure_memory[10*ch + 9] = pressure[ch];
+		}
+		// Add the current value to memory, but the farther from the average it is, the less it is considered
+		else if(weights[ch] < 50) {
+			float coef = pressure[ch] == avg ? avg : 2.0 / (float)(pressure[ch] - avg);
+			pressure_memory[10*ch + 9] = (int32_t)(((float)avg + coef*(float)pressure[ch]) / (1.0 + coef));
+		}
 	}
 }
 
-void int_array_to_str(int16_t* array, char* str, uint8_t len) {
+void uint8_array_to_str(uint8_t* array, char* str, uint8_t len) {
 	char number[20];
 	str[0] = '\0';
 	for(uint8_t i = 0; i < len; i++) {
@@ -112,6 +126,7 @@ void static recv_cb(mesh_addr_t *from, mesh_data_t *data)
 static void sensor_info(void* args)
 {
 	uint8_t spi_errors = 0;
+	uint8_t changes = 0;
 	spi_device_handle_t device;
 
 	time_t date;
@@ -121,8 +136,14 @@ static void sensor_info(void* args)
 	char* presence_str = malloc(500*sizeof(char));
 
 	float pressure_offset[4] = { 0.0 };
-	float pressure[4] = { 0.0 };
-	int16_t presence[CONFIG_X_LEN * CONFIG_Y_LEN];
+	int32_t pressure[4] = { 0 };
+	int32_t* pressure_memory = malloc(40*sizeof(int32_t));
+	uint8_t weights[4] = { 0 };
+	uint8_t presence[CONFIG_X_LEN * CONFIG_Y_LEN];
+
+	for(uint8_t i = 0; i < 40; i++) {
+		pressure_memory[i] = 0;
+	}
 
 	// Set current time from SNTP server
 	setenv("TZ", "UTC+1", 1);
@@ -137,25 +158,38 @@ static void sensor_info(void* args)
 
 	// Inits
 	i2c_master_init();
-	at42qt_spi_init(&device);
-	at42qt_setup(device);
+	fdc1004_set_gain(0x4000);
+	fdc1004_calibrate_all(pressure_offset);
+	//at42qt_spi_init(&device);
+	//at42qt_setup(device);
 
     while(1) {
-		at42qt_check_errors(device, &spi_errors);
+		//at42qt_check_errors(device, &spi_errors);
 
 		for(uint8_t i = 0; i < 4; i++) {
 			fdc1004_measure(i+1, pressure_offset[i], &(pressure[i]));
 		}
 
-		at42qt_get_values(device, presence);
+		compute_weight(pressure, pressure_memory, weights);
 
-		float_array_to_str(pressure, pressure_str, 4);
-		int_array_to_str(presence, presence_str, CONFIG_X_LEN*CONFIG_Y_LEN);
+		/*
+		if(at42qt_has_changed()) {
+			changes++;
+			at42qt_get_status(device, presence);
+			if(changes == 10) {
+				changes = 0;
+				// TODO : calibrate
+			}
+		}
+		*/
+
+		uint8_array_to_str(weights, pressure_str, 4);
+		uint8_array_to_str(presence, presence_str, CONFIG_X_LEN*CONFIG_Y_LEN);
 
 		time(&date);
 		strftime(date_str, 30, "+%Y-%m-%dT%H:%M:%S%z", localtime(&date));
 
-		sprintf(print, "{\"id\":0, \"timestamp\":\"%s\", \"pressure\":[%s],\"presence\":[%s]}", date_str, pressure_str, presence_str);
+		sprintf(print, "{\"id\":%d, \"timestamp\":\"%s\",\n\"pressure\":[%s],\n\"presence\":[%s]}",CONFIG_SENSOR_ID, date_str, pressure_str, presence_str);
 
 		mqtt_app_publish("nimbus/modular_sensor_platform", print);
 

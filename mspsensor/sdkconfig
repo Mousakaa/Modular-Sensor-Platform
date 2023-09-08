@@ -403,12 +403,15 @@ CONFIG_PARTITION_TABLE_MD5=y
 # MSP Sensor Configuration
 #
 CONFIG_X_LEN=8
-CONFIG_Y_LEN=7
+CONFIG_Y_LEN=8
+CONFIG_SENSOR_ID=0
 # end of MSP Sensor Configuration
 
 #
 # MSP Network Configuration
 #
+CONFIG_MQTT_SERVER="mqtt://mqtt.eclipseprojects.io"
+CONFIG_MQTT_TOPIC="nimbus/modular_sensor_platform"
 CONFIG_MESH_CHANNEL=0
 CONFIG_MESH_ROUTER_SSID="iPhone"
 CONFIG_MESH_ROUTER_PASSWD="orodovenajdtvqpci"

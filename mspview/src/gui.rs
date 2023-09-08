@@ -42,7 +42,7 @@ pub struct App {
     pressure_res:Vec<usize>,
     /// Number of sensors on each tile.
     nb_sensors: usize,
-    /// Number of tiles in each column of the array.
+    /// Number of tiles in each column of thejarray.
     lins: usize,
     /// Number of tiles in each line of the array.
     cols: usize,
@@ -89,7 +89,7 @@ impl App {
 
                 let color = if self.pressure_res[0]*self.pressure_res[1] == state.pressure.len() {
                     let value = state.pressure[s_x as usize + s_y as usize * self.pressure_res[0] ];
-                    spectrum(value as u8)
+                    spectrum(value)
                 }
                 else {
                     image::Rgb([0; 3])
@@ -107,9 +107,9 @@ impl App {
         for s_x in 0..self.presence_res[0] as u32 {
             for s_y in 0..self.presence_res[1] as u32 {
 
-                let color = if self.presence_res[0]*self.presence_res[1] == state.presence.len() {
-                    let value = state.presence[s_x as usize + s_y as usize * self.presence_res[0] ];
-                    spectrum((value.abs() / 8) as u8)
+                let color = if self.presence_res[0]*self.presence_res[1] == state.presence.len()
+                                        && state.presence[s_x as usize + s_y as usize * self.presence_res[0]] == 1 {
+                    image::Rgb([255; 3])
                 }
                 else {
                     image::Rgb([0; 3])
@@ -275,7 +275,7 @@ impl App {
         let mut crossview = self.interpolated_presence();
 
         for i in 0..crossview.pixels.len() {
-            crossview.pixels[i] = if value_from(crossview.pixels[i]) >= self.threshold {
+            crossview.pixels[i] = if crossview.pixels[i].r() >= self.threshold { // TODO : Tidy THAT up
                 if i < pressure.pixels.len() {
                     pressure.pixels[i]
                 }

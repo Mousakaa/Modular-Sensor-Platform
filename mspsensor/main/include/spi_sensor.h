@@ -11,8 +11,8 @@
 // #define CMD_REQUEST_SLEEP 0xfb
 // #define CMD_FORCE_RESET 0x40
 
-// Blocks while nothing happens (doesn't work for some reason)
-void at42qt_spi_wait_for_change(void);
+// Tests if any touch is detected
+bool at42qt_has_changed(void);
 
 // Writes `n` bytes of data to the AT42QT2640, starting at the address `addr`
 // (which is a 12-byte integer). `n` must be smaller than 512.

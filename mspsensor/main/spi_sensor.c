@@ -47,11 +47,14 @@
 #define DRIFT_SETUP_BLOCK_ADDR 833
 #define DIL_SETUP_BLOCK_ADDR 897
 #define NRD_SETUP_BLOCK_ADDR 961
+#define BL_SETUP_BLOCK_ADDR 1025
 #define THRM_HYST_SETUP_ADDR 1217
 #define DWELL_SETUP_ADDR 1218
 #define LSL_LSB_SETUP_ADDR 1219
 #define LSL_MSB_SETUP_ADDR 1220
 #define DHT_SETUP_ADDR 1222
+#define FHM_SETUP_ADDR 1224
+#define FREQ0_SETUP_ADDR 1225
 #define HCRC_LSB_SETUP_ADDR 1246
 #define HCRC_MSB_SETUP_ADDR 1247
 #define SETUP_SIZE 477 // Size of the setup block (in bytes) without the 2 final CRC bytes
@@ -93,12 +96,9 @@ void at42qt_spi_wait_for_ready(void) {
 	while(!gpio_get_level(PIN_NUM_DRDY));
 }
 
-// Blocks while nothing happens (doesn't work for some reason)
-void at42qt_spi_wait_for_change(void) {
-	if(!gpio_get_level(PIN_NUM_CH)) {
-		while(!gpio_get_level(PIN_NUM_CH));
-	}
-	while(gpio_get_level(PIN_NUM_CH));
+// Tests if there was a detection
+bool at42qt_has_changed(void) {
+	return(!gpio_get_level(PIN_NUM_CH));
 }
 
 // Sends a byte of data to the device on the MOSI line, and simultaneously reads a byte
@@ -246,7 +246,7 @@ void at42qt_check_errors(spi_device_handle_t device, uint8_t* prev_errors) {
 	uint8_t error_cnt;
 	uint8_t status;
 
-	if(at42qt_spi_read(device, FAIL_CNT_ADDR, &error_cnt, 1) && error_cnt != *prev_errors) {
+	if(prev_errors != NULL && at42qt_spi_read(device, FAIL_CNT_ADDR, &error_cnt, 1) && error_cnt != *prev_errors) {
 		ESP_LOGE(TAG, "Signal capture failure\033[K");
 		*prev_errors = error_cnt;
 	}
@@ -281,14 +281,34 @@ void at42qt_setup(spi_device_handle_t device) {
 	// MODIFY SETUP
 	for(uint8_t y = 0; y < 8; y++) {
 		for(uint8_t x = 0; x < 8; x++) {
+			// Set negative thresholds to 26 cycles and positive thresholds to 6 cycles
+			// to allow for quick recalibration on positive detection.
+			setup_block[THR_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = (0 << 4) | 10;
+			// Set negative drift recalibration period to 1s and positive drift
+			// recalibration period to 0.1s.
+			setup_block[DRIFT_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = 1;
 			// Disable unused keys
 			if(x >= CONFIG_X_LEN || y >= CONFIG_Y_LEN) {
 				setup_block[DIL_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] &= 0xf << 4;
 			}
-			// Disable automatic recalibration
+			else {
+				setup_block[DIL_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = (5 << 4) | 2;
+			}
+			// Disable automatic recalibration for all keys
 			setup_block[NRD_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = 0;
+			// Set burst length to 48 pulses for all keys
+			setup_block[BL_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] |= 2 << 4;
 		}
 	}
+	// Set dwell time to 2.1 microseconds
+	setup_block[DWELL_SETUP_ADDR - SETUP_BLOCK_ADDR] = 10;
+	// Set LSL to 100
+	setup_block[LSL_LSB_SETUP_ADDR - SETUP_BLOCK_ADDR] = 100;
+	setup_block[LSL_MSB_SETUP_ADDR - SETUP_BLOCK_ADDR] = 0;
+	// Disable frequency hopping and set positive recalibration delay to 0.5s.
+	setup_block[FHM_SETUP_ADDR - SETUP_BLOCK_ADDR] = (0 << 6) | 4;
+	// Set burst frequency to
+	setup_block[FREQ0_SETUP_ADDR - SETUP_BLOCK_ADDR] = 10;
 
 	// CALCULATE CRC
 	for(uint16_t i = 0; i < SETUP_SIZE; i++) {
@@ -301,6 +321,8 @@ void at42qt_setup(spi_device_handle_t device) {
 	// WRITE TO DEVICE
 	at42qt_send_command(device, CMD_ENABLE_WRITE_SETUP);
 	at42qt_spi_write(device, SETUP_BLOCK_ADDR, setup_block, SETUP_SIZE + 2);
+
+	at42qt_check_errors(device, NULL);
 
 	// RESET
 	at42qt_spi_reset(device);
@@ -327,7 +349,7 @@ void at42qt_get_values(spi_device_handle_t device, int16_t* values) {
 		for(uint8_t x = 0; x < CONFIG_X_LEN; x++) {
 			if(at42qt_spi_read(device, KEY_DATA_BLOCK_ADDR[y][x], val, 2)) {
 				values[y+x*CONFIG_Y_LEN] = (((int16_t)(val[1] & 0b11111) << 8) | val[0])
-								  - (((int16_t)(val[3] & 0b11111) << 8) | val[2]);
+										 - (((int16_t)(val[3] & 0b11111) << 8) | val[2]);
 			}
 		}
 	}

@@ -34,6 +34,10 @@ static const char *TAG = "FDC1004";
 #define CONF_MEAS3                  0x0a
 #define CONF_MEAS4                  0x0b
 #define FDC_CONF                    0x0c
+#define GAIN_CAL_CIN1               0x11
+#define GAIN_CAL_CIN2               0x12
+#define GAIN_CAL_CIN3               0x13
+#define GAIN_CAL_CIN4               0x14
 
 // Read a 16-bit integer from a FDC1004 register
 void fdc1004_read(uint8_t reg_addr, uint16_t *data) {
@@ -71,8 +75,16 @@ void i2c_master_init(void) {
     ESP_LOGI(TAG, "I2C for FDC1004 initialized successfully");
 }
 
+// Set the internal gain of the FDC1004 (measurements are no longer in pF)
+void fdc1004_set_gain(uint16_t gain) {
+	fdc1004_write(GAIN_CAL_CIN1, gain);
+	fdc1004_write(GAIN_CAL_CIN2, gain);
+	fdc1004_write(GAIN_CAL_CIN3, gain);
+	fdc1004_write(GAIN_CAL_CIN4, gain);
+}
+
 // Setup and wait for data from one of the four channels of the device
-void fdc1004_measure(uint8_t channel, float offset, float* measurement) {
+void fdc1004_measure(uint8_t channel, float offset, int32_t* measurement) {
 
 	uint8_t ch_id = channel - 1;
 
@@ -101,5 +113,30 @@ void fdc1004_measure(uint8_t channel, float offset, float* measurement) {
 	fdc1004_read(MEAS1_MSB, &meas1_msb);
 	fdc1004_read(MEAS1_LSB, &meas1_lsb);
 
-	*measurement = (float)((int32_t)((meas1_msb << 16) | meas1_lsb) / 256) / 524288.0 + offset;
+	*measurement = (int32_t)((meas1_msb << 16) | meas1_lsb) / 256;
+}
+
+// Automatically adjust the offset value for a channel
+void fdc1004_calibrate(uint8_t channel, float* offset) {
+	int32_t meas;
+	float A = 0.0;
+	float B = 100.0;
+	while(B-A > 1.0) {
+		*offset = (A + B) / 2.0;
+		fdc1004_measure(channel, *offset, &meas);
+		if(meas > 0) {
+			A = *offset;
+		}
+		else {
+			B = *offset;
+		}
+	}
+	ESP_LOGI(TAG, "Channel %d offset : %f", channel, *offset);
+}
+
+// Automatically calibrate every channel
+void fdc1004_calibrate_all(float* offsets) {
+	for(uint8_t ch = 1; ch <= 4; ch++) {
+		fdc1004_calibrate(ch, &(offsets[ch-1]));
+	}
 }

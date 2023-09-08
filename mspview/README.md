@@ -6,12 +6,6 @@ This tool is developed in the Rust programming language.
 
 The [paho-mqtt](https://docs.rs/paho-mqtt/latest/paho_mqtt) crate was used to implement the MQTT connection to retrieve data from the sensors. It connects to the `mqtt.eclipseprojects.io` public MQTT server.
 
-### TODO :
-
-* [X] Implement automatic reconnection
-* [X] Add timestamp to sensor data struct
-
-
 ## The GUI
 
 All visual aspects are based on the [egui](https://docs.rs/egui/latest/egui) and [eframe](https://docs.rs/eframe/latest/eframe) crates, with the use of [image](https://docs.rs/image/latest/image) for the image interpolation algorithms.
