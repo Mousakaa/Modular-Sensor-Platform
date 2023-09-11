@@ -160,11 +160,11 @@ static void sensor_info(void* args)
 	i2c_master_init();
 	fdc1004_set_gain(0x4000);
 	fdc1004_calibrate_all(pressure_offset);
-	//at42qt_spi_init(&device);
-	//at42qt_setup(device);
+	at42qt_spi_init(&device);
+	at42qt_setup(device);
 
     while(1) {
-		//at42qt_check_errors(device, &spi_errors);
+		at42qt_check_errors(device, &spi_errors);
 
 		for(uint8_t i = 0; i < 4; i++) {
 			fdc1004_measure(i+1, pressure_offset[i], &(pressure[i]));
@@ -172,16 +172,14 @@ static void sensor_info(void* args)
 
 		compute_weight(pressure, pressure_memory, weights);
 
-		/*
 		if(at42qt_has_changed()) {
 			changes++;
 			at42qt_get_status(device, presence);
-			if(changes == 10) {
+			if(changes == 10 && weights[0] < 10 && weights[1] < 10 && weights[2] < 10 && weights[3] < 10) {
 				changes = 0;
-				// TODO : calibrate
+				at42qt_send_command(device, CMD_CALIBRATE_ALL);
 			}
 		}
-		*/
 
 		uint8_array_to_str(weights, pressure_str, 4);
 		uint8_array_to_str(presence, presence_str, CONFIG_X_LEN*CONFIG_Y_LEN);

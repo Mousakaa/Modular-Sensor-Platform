@@ -256,9 +256,31 @@ impl App {
             egui::TextureOptions::NEAREST
         );
 
+        let mut image_rect = egui::Rect::NOTHING;
+
         ui.centered_and_justified(|ui| {
-            ui.image(&texture, egui::vec2(height*ratio, height));
+            image_rect = ui.image(&texture, egui::vec2(height*ratio, height)).rect;
         });
+        
+        let side = (image_rect.width()/(2.0*self.cols as f32)).min(image_rect.height()/(2.0*self.lins as f32));
+
+        for x in 0..2*self.cols {
+            for y in 0..2*self.lins {
+                ui.put(
+                    image_rect
+                        .shrink2(egui::vec2(self.cols as f32, self.lins as f32))
+                        .translate(egui::vec2(
+                                (x as f32 + 0.5 - self.cols as f32)*side,
+                                (y as f32 + 0.5 - self.lins as f32)*side)
+                            ),
+                    egui::Label::new(egui::RichText::new(value_from(egui::Color32::from_rgb(
+                            self.pressure_img.get_pixel(x as u32, y as u32).0[0],
+                            self.pressure_img.get_pixel(x as u32, y as u32).0[1],
+                            self.pressure_img.get_pixel(x as u32, y as u32).0[2]
+                    )).to_string() + " kg").size(side/3.0))
+                );
+            }
+        }
     }
 
     /// UI for the Cross View screen
