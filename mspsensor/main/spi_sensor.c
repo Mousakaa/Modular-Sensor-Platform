@@ -254,6 +254,7 @@ void at42qt_check_errors(spi_device_handle_t device, uint8_t* prev_errors) {
 	if(at42qt_spi_read(device, DEVICE_STATUS_ADDR, &status, 1)) {
 		if(status & (1 << 2)) {
 			ESP_LOGE(TAG, "LSL failure\033[K");
+			at42qt_send_command(device, CMD_CALIBRATE_ALL);
 		}
 		if(status & (1 << 3)) {
 			ESP_LOGE(TAG, "Mains sync error\033[K");
@@ -263,6 +264,7 @@ void at42qt_check_errors(spi_device_handle_t device, uint8_t* prev_errors) {
 		}
 		if(status & (1 << 5)) {
 			ESP_LOGE(TAG, "FMEA failure\033[K");
+			at42qt_send_command(device, CMD_CALIBRATE_ALL);
 		}
 		if(status & (1 << 6)) {
 			ESP_LOGE(TAG, "Calibration error\033[K");
@@ -281,12 +283,12 @@ void at42qt_setup(spi_device_handle_t device) {
 	// MODIFY SETUP
 	for(uint8_t y = 0; y < 8; y++) {
 		for(uint8_t x = 0; x < 8; x++) {
-			// Set negative thresholds to 26 cycles and positive thresholds to 6 cycles
+			// Set negative thresholds to 26 cycles and positive thresholds to 26 cycles
 			// to allow for quick recalibration on positive detection.
-			setup_block[THR_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = (0 << 4) | 10;
+			setup_block[THR_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = (10 << 4) | 10;
 			// Set negative drift recalibration period to 1s and positive drift
 			// recalibration period to 0.1s.
-			setup_block[DRIFT_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = 1;
+			setup_block[DRIFT_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = 6;
 			// Disable unused keys
 			if(x >= CONFIG_X_LEN || y >= CONFIG_Y_LEN) {
 				setup_block[DIL_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] &= 0xf << 4;
@@ -296,12 +298,12 @@ void at42qt_setup(spi_device_handle_t device) {
 			}
 			// Disable automatic recalibration for all keys
 			setup_block[NRD_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] = 0;
-			// Set burst length to 48 pulses for all keys
-			setup_block[BL_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] |= 2 << 4;
+			// Set burst length to 64 pulses for all keys
+			setup_block[BL_SETUP_BLOCK_ADDR - SETUP_BLOCK_ADDR + x + y*8] |= 3 << 4;
 		}
 	}
 	// Set dwell time to 2.1 microseconds
-	setup_block[DWELL_SETUP_ADDR - SETUP_BLOCK_ADDR] = 10;
+	setup_block[DWELL_SETUP_ADDR - SETUP_BLOCK_ADDR] = 5;
 	// Set LSL to 100
 	setup_block[LSL_LSB_SETUP_ADDR - SETUP_BLOCK_ADDR] = 100;
 	setup_block[LSL_MSB_SETUP_ADDR - SETUP_BLOCK_ADDR] = 0;

@@ -84,6 +84,9 @@ impl App {
     pub fn process(&mut self, state: SensorState) {
         let x = (state.id as usize % self.cols) as u32 ;
         let y = (state.id as usize / self.cols) as u32;
+        if state.id as usize >= self.nb_sensors {
+            return;
+        }
         for s_x in 0..self.pressure_res[0] as u32 {
             for s_y in 0..self.pressure_res[1] as u32 {
 

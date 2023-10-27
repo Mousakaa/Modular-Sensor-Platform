@@ -177,7 +177,7 @@ static void sensor_info(void* args)
 			at42qt_get_status(device, presence);
 			if(changes == 10 && weights[0] < 10 && weights[1] < 10 && weights[2] < 10 && weights[3] < 10) {
 				changes = 0;
-				at42qt_send_command(device, CMD_CALIBRATE_ALL);
+				//at42qt_send_command(device, CMD_CALIBRATE_ALL);
 			}
 		}
 
